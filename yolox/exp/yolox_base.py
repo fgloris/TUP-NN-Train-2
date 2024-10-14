@@ -19,18 +19,9 @@ class Exp(BaseExp):
         self.use_distillation  = False
         self.teacher_pth = "/home/rangeronmars/AI/TUP-NN-Train/teacher/teacher.pth"
         # ---------------- model config ---------------- #
-        self.num_classes = 9
-        self.num_colors = 4
+        self.num_classes = 8
+        self.num_colors = 2
         self.num_apexes = 4
-        # self.num_classes = 2
-        # self.num_colors = 2
-        # self.num_apexes = 5
-        # self.num_classes = 8
-        # self.num_colors = 8
-        # self.num_apexes = 4
-        # self.num_classes = 1
-        # self.num_colors = 1
-        # self.num_apexes = 4
         self.depth = 1.00
         self.width = 1.00
         self.act = 'relu'
@@ -38,7 +29,7 @@ class Exp(BaseExp):
         # ---------------- dataloader config ---------------- #
         # set worker to 4 for shorter dataloader init time
         self.data_num_workers = 8
-        self.input_size = (640,640)  # (height, width)
+        self.input_size = (416,416)  # (height, width)
         # self.input_size = (960,960)  # (height, width)
         # Actual multiscale ranges: [640-5*32, 640+5*32].
         # To disable multiscale training, set the
@@ -46,7 +37,7 @@ class Exp(BaseExp):
         # self.multiscale_range = 5
         # You can uncomment this line to specify a multiscale range
         self.random_size = (10, 18)
-        self.data_dir = "/home/nine-fish/datasets/armor_finnal"
+        self.data_dir = "/home/ginger/Documents/GitHub/datasets/armor_dataset"
         self.train_ann = "instances_train2017.json"
         self.val_ann = "instances_val2017.json"
 
@@ -73,7 +64,7 @@ class Exp(BaseExp):
         # --------------  training config --------------------- #
         #For Using SGD+Momentum
         self.warmup_epochs = 40
-        self.max_epoch = 500
+        self.max_epoch = 200
         self.warmup_lr = 0
         self.basic_lr_per_img = 0.001
         self.scheduler = "yoloxwarmcos"
@@ -95,7 +86,7 @@ class Exp(BaseExp):
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
 
         # -----------------  testing config ------------------ #
-        self.test_size = (640,640)
+        self.test_size = (416,416)
         # self.test_size = (960,960)
         self.test_conf = 0.25
         self.nmsthre = 0.3
