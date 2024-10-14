@@ -258,7 +258,7 @@ class C2f(nn.Module):
         super().__init__()
         hidden_channels = int(out_channels * expansion)  # hidden channels
         self.conv1 = BaseConv(in_channels, 2 * hidden_channels, 1, stride=1, act=act)
-        self.conv2 = BaseConv((2 + n) * in_channels, hidden_channels, 1, stride=1, act=act)
+        self.conv2 = BaseConv((2 + n) * hidden_channels, out_channels, 1, stride=1, act=act)
         self.m = nn.ModuleList(Bottleneck(hidden_channels, hidden_channels, shortcut, 1.0, depthwise, act=act) for _ in range(n))
 
     def forward(self, x):
