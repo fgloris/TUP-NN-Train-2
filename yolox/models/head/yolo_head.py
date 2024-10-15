@@ -772,7 +772,7 @@ class YOLOXHead(nn.Module):
         if mode == "cpu":
             cls_preds_, color_preds_, obj_preds_ = cls_preds_.cpu(), color_preds_.cpu(), obj_preds_.cpu()
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             cls_preds_ = (
                 cls_preds_.float().sigmoid_().unsqueeze(0).repeat(num_gt, 1, 1)
                 * obj_preds_.float().sigmoid_().unsqueeze(0).repeat(num_gt, 1, 1)
@@ -958,3 +958,335 @@ class YOLOXHead(nn.Module):
             fg_mask_inboxes
         ]
         return num_fg, gt_matched_classes, gt_matched_colors, pred_ious_this_matching, matched_gt_inds
+
+class YOLOXHeadClsEnhance(YOLOXHead):
+    cls_weight = 1.00005
+    max_cls_weight = 20
+    def __init__(
+        self,
+        num_apexes,
+        num_classes,
+        num_colors,
+        width=1.0,
+        strides=[8, 16, 32],
+        in_channels=[256, 512, 1024],
+        act="silu",
+        depthwise=False,
+        ksize_head=5
+    ):
+        super().__init__(num_apexes, num_classes, num_colors, width, strides, in_channels, act, depthwise, ksize_head)
+
+    def forward(self, xin, labels=None, imgs=None):
+        if self.cls_weight<self.max_cls_weight: self.cls_weight *= 1.00005
+        return super().forward(xin, labels, imgs)
+
+    def get_losses_distill(
+        self,
+        imgs,
+        x_shifts,
+        y_shifts,
+        expanded_strides,
+        labels,
+        outputs,
+        origin_preds,
+        dtype,
+    ):
+
+        # # Cut feature map into bbox,obj,color,cls
+        # [batch, n_anchors_all, self.num_apexes * 2]
+        bbox_preds = outputs[:, :, :self.num_apexes * 2].contiguous()
+        obj_preds = outputs[:, :, self.num_apexes * 2].contiguous()  # [batch, n_anchors_all, 1]
+        color_preds = outputs[:, :, self.num_apexes * 2 + 1:self.num_apexes *
+                              2 + 1 + self.num_colors].contiguous()  # [batch, n_anchors_all, n_color]
+        cls_preds = outputs[:, :, self.num_apexes * 2 + 1 +
+                            self.num_colors:].contiguous()  # [batch, n_anchors_all, n_cls]
+
+        # [batch, n_anchors_all, self.num_apexes * 2]
+        bbox_teacher = labels[:, :, :self.num_apexes * 2].contiguous()
+        obj_teacher = labels[:, :, self.num_apexes * 2].contiguous()  # [batch, n_anchors_all, 1]
+        color_teacher = labels[:, :, self.num_apexes * 2 + 1:self.num_apexes *
+                               2 + 1 + self.num_colors].contiguous()  # [batch, n_anchors_all, n_color]
+        cls_teacher = labels[:, :, self.num_apexes * 2 + 1 +
+                             self.num_colors:].contiguous()  # [batch, n_anchors_all, n_cls]
+
+        x_shifts = torch.cat(x_shifts, 1)  # [1, n_anchors_all]
+        y_shifts = torch.cat(y_shifts, 1)  # [1, n_anchors_all]
+
+        gt_masks = (obj_teacher > 0.3)
+        num_postive = (int)(obj_teacher.sum())
+        l1_targets = []
+
+        loss_reg = (
+            self.wing_loss(bbox_preds[gt_masks], bbox_teacher[gt_masks])
+        ).sum() / num_postive
+
+        loss_obj = (
+            self.bcewithlog_loss(obj_preds, obj_teacher)
+        ).sum() / num_postive
+
+        loss_cls = (
+            self.bcewithlog_loss_cls(
+                cls_preds[gt_masks].view(-1, self.num_classes), cls_teacher[gt_masks].view(-1, self.num_classes))
+        ).sum() / num_postive
+
+        loss_colors = (
+            self.bcewithlog_loss_colors(
+                color_preds[gt_masks].view(-1,
+                                           self.num_colors), color_teacher[gt_masks].view(-1, self.num_colors)
+            )
+        ).sum() / num_postive
+
+        if self.use_l1:
+            loss_l1 = (
+                self.l1_loss(bbox_preds[gt_masks].view(-1, self.num_apexes * 2),
+                             bbox_teacher[gt_masks].view(-1, self.num_apexes * 2))
+            ).sum() / num_postive
+        else:
+            loss_l1 = 0.0
+
+        reg_weight = 100
+        conf_weight = 1
+        clr_weight = 1
+        cls_weight = self.cls_weight
+        loss = reg_weight * loss_reg + conf_weight * loss_obj + \
+            cls_weight * loss_cls + clr_weight * loss_colors + 0.1 * loss_l1
+
+        return (
+            loss,
+            reg_weight * loss_reg,
+            conf_weight * loss_obj,
+            cls_weight * loss_cls,
+            clr_weight * loss_colors,
+            0.1 * loss_l1,
+            1,
+        )
+
+    def get_losses(
+        self,
+        imgs,
+        x_shifts,
+        y_shifts,
+        expanded_strides,
+        labels,
+        outputs,
+        origin_preds,
+        dtype,
+    ):
+        # Cut feature map into bbox,obj,color,cls
+        # [batch, n_anchors_all, self.num_apexes * 2]
+        bbox_preds = outputs[:, :, :self.num_apexes * 2]
+        obj_preds = outputs[:, :, self.num_apexes * 2].unsqueeze(-1)  # [batch, n_anchors_all, 1]
+        color_preds = outputs[:, :, self.num_apexes * 2 + 1:self.num_apexes *
+                              2 + 1 + self.num_colors]  # [batch, n_anchors_all, n_color]
+        cls_preds = outputs[:, :, self.num_apexes * 2 + 1 +
+                            self.num_colors:]  # [batch, n_anchors_all, n_cls]
+
+        # Calculate targets
+        nlabel = (labels.sum(dim=2) > 0).sum(dim=1)  # number of objects
+
+        total_num_anchors = outputs.shape[1]
+        x_shifts = torch.cat(x_shifts, 1)  # [1, n_anchors_all]
+        y_shifts = torch.cat(y_shifts, 1)  # [1, n_anchors_all]
+        expanded_strides = torch.cat(expanded_strides, 1)
+        if self.use_l1:
+            origin_preds = torch.cat(origin_preds, 1)
+
+        cls_targets = []
+        colors_targets = []
+        reg_targets = []
+        l1_targets = []
+        obj_targets = []
+        fg_masks = []
+
+        num_fg = 0.0
+        num_gts = 0.0
+        # Label format:[Class, Reg]
+        # Travel all labels for all batches
+        for batch_idx in range(outputs.shape[0]):
+            num_gt = int(nlabel[batch_idx])
+            num_gts += num_gt
+            if num_gt == 0:
+                cls_target = outputs.new_zeros((0, self.num_classes))
+                colors_target = outputs.new_zeros((0, self.num_colors))
+                reg_target = outputs.new_zeros((0, self.num_apexes * 2))
+                l1_target = outputs.new_zeros((0, self.num_apexes * 2))
+                obj_target = outputs.new_zeros((total_num_anchors, 1))
+                fg_mask = outputs.new_zeros(total_num_anchors).bool()
+            else:
+                gt_bboxes_per_image = labels[batch_idx, :num_gt, 1:]
+                # Get ground true classes and color
+                gt_classes = labels[batch_idx, :num_gt, 0] % self.num_classes
+                gt_colors = labels[batch_idx, :num_gt, 0] // self.num_classes
+                # Get all bbox preds
+                bboxes_preds_per_image = bbox_preds[batch_idx]
+                # Generate rect bbox for apexs
+                gt_rect_bboxes_per_image = min_rect(gt_bboxes_per_image)
+                rect_bboxes_preds_per_image = min_rect(bboxes_preds_per_image)
+                (
+                    gt_matched_classes,
+                    gt_matched_colors,
+                    fg_mask,
+                    pred_ious_this_matching,
+                    matched_gt_inds,
+                    num_fg_img,
+                ) = self.get_assignments(
+                    batch_idx,  # Batch
+                    num_gt,  # Number of ground true
+                    total_num_anchors,  # Total number of anchors
+                    gt_rect_bboxes_per_image,  # Ground True classes per image
+                    gt_classes,  # Ground True classes
+                    gt_colors,
+                    rect_bboxes_preds_per_image,
+                    expanded_strides,
+                    x_shifts,
+                    y_shifts,
+                    cls_preds,
+                    color_preds,
+                    bbox_preds,
+                    obj_preds,
+                    labels,
+                    imgs,
+                )
+                try:
+                    (
+                        gt_matched_classes,
+                        gt_matched_colors,
+                        fg_mask,
+                        pred_ious_this_matching,
+                        matched_gt_inds,
+                        num_fg_img,
+                    ) = self.get_assignments(
+                        batch_idx,  # Batch
+                        num_gt,  # Number of ground true
+                        total_num_anchors,  # Total number of anchors
+                        gt_rect_bboxes_per_image,  # Ground True classes per image
+                        gt_classes,  # Ground True classes
+                        gt_colors,
+                        rect_bboxes_preds_per_image,
+                        expanded_strides,
+                        x_shifts,
+                        y_shifts,
+                        cls_preds,
+                        color_preds,
+                        bbox_preds,
+                        obj_preds,
+                        labels,
+                        imgs,
+                    )
+                except RuntimeError:
+                    logger.error(
+                        "OOM RuntimeError is raised due to the huge memory cost during label assignment. \
+                           CPU mode is applied in this batch. If you want to avoid this issue, \
+                           try to reduce the batch size or image size."
+                    )
+                    # torch.cuda.empty_cache()
+                    (
+                        gt_matched_classes,
+                        gt_matched_colors,
+                        fg_mask,
+                        pred_ious_this_matching,
+                        matched_gt_inds,
+                        num_fg_img,
+                    ) = self.get_assignments(
+                        batch_idx,  # Batch
+                        num_gt,  # Number of ground true
+                        total_num_anchors,  # Total number of anchors
+                        gt_rect_bboxes_per_image,  # Ground True classes per image
+                        gt_classes,  # Ground True classes
+                        gt_colors,
+                        rect_bboxes_preds_per_image,
+                        expanded_strides,
+                        x_shifts,
+                        y_shifts,
+                        cls_preds,
+                        color_preds,
+                        bbox_preds,
+                        obj_preds,
+                        labels,
+                        imgs,
+                        "cpu",
+                    )
+
+                torch.cuda.empty_cache()
+                num_fg += num_fg_img
+
+                cls_target = F.one_hot(
+                    gt_matched_classes.to(torch.int64), self.num_classes
+                ) * pred_ious_this_matching.unsqueeze(-1)
+                colors_target = F.one_hot(
+                    gt_matched_colors.to(torch.int64), self.num_colors
+                ) * pred_ious_this_matching.unsqueeze(-1)
+                
+                obj_target = fg_mask.unsqueeze(-1)
+                reg_target = gt_bboxes_per_image[matched_gt_inds]
+                if self.use_l1:
+                    l1_target = self.get_l1_target(
+                        outputs.new_zeros((num_fg_img, self.num_apexes * 2)),
+                        gt_bboxes_per_image[matched_gt_inds],
+                        expanded_strides[0][fg_mask],
+                        x_shifts=x_shifts[0][fg_mask],
+                        y_shifts=y_shifts[0][fg_mask],
+                    )
+
+            cls_targets.append(cls_target)
+            colors_targets.append(colors_target)
+            reg_targets.append(reg_target)
+            obj_targets.append(obj_target.to(dtype))
+            fg_masks.append(fg_mask)
+            if self.use_l1:
+                l1_targets.append(l1_target)
+
+        cls_targets = torch.cat(cls_targets, 0)
+        colors_targets = torch.cat(colors_targets, 0)
+        reg_targets = torch.cat(reg_targets, 0)
+        obj_targets = torch.cat(obj_targets, 0)
+        fg_masks = torch.cat(fg_masks, 0)
+        if self.use_l1:
+            l1_targets = torch.cat(l1_targets, 0)
+        num_fg = max(num_fg, 1)
+
+        loss_reg = (
+            self.wing_loss(bbox_preds.view(-1, self.num_apexes * 2)[fg_masks], reg_targets)
+        ).sum() / num_fg
+
+        loss_obj = (
+            self.bcewithlog_loss(obj_preds.view(-1, 1), obj_targets)
+        ).sum() / num_fg
+
+        loss_cls = (
+            self.bcewithlog_loss_cls(
+                cls_preds.view(-1, self.num_classes)[fg_masks], cls_targets
+            )
+        )
+
+        loss_cls = loss_cls.sum() / num_fg
+
+        loss_colors = (
+            self.bcewithlog_loss_colors(
+                color_preds.view(-1, self.num_colors)[fg_masks], colors_targets
+            )
+        ).sum() / num_fg
+
+        if self.use_l1:
+            loss_l1 = (
+                self.l1_loss(origin_preds.view(-1, self.num_apexes * 2)[fg_masks], l1_targets)
+            ).sum() / num_fg
+        else:
+            loss_l1 = 0.0
+
+        reg_weight = 80
+        conf_weight = 1.5
+        clr_weight = 1
+        cls_weight = self.cls_weight
+        loss = reg_weight * loss_reg + conf_weight * loss_obj + \
+            cls_weight * loss_cls + clr_weight * loss_colors + loss_l1
+
+        return (
+            loss,
+            reg_weight * loss_reg,
+            conf_weight * loss_obj,
+            cls_weight * loss_cls,
+            clr_weight * loss_colors,
+            loss_l1,
+            num_fg / max(num_gts, 1),
+        )

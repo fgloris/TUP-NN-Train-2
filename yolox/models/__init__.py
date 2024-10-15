@@ -2,5 +2,5 @@
 # -*- coding:utf-8 -*-
 # Copyright (c) 2014-2021 Megvii Inc. All rights reserved.
 
-from .head.yolo_head import YOLOXHead
+from .head.yolo_head import YOLOXHead, YOLOXHeadClsEnhance
 from .yolox import YOLOX

@@ -245,7 +245,6 @@ class C2f(nn.Module):
         n=1,
         shortcut=True,
         expansion=0.5,
-        depthwise=False,
         act="hswish",
     ):
         """
@@ -259,7 +258,7 @@ class C2f(nn.Module):
         hidden_channels = int(out_channels * expansion)  # hidden channels
         self.conv1 = BaseConv(in_channels, 2 * hidden_channels, 1, stride=1, act=act)
         self.conv2 = BaseConv((2 + n) * hidden_channels, out_channels, 1, stride=1, act=act)
-        self.m = nn.ModuleList(Bottleneck(hidden_channels, hidden_channels, shortcut, 1.0, depthwise, act=act) for _ in range(n))
+        self.m = nn.ModuleList(Bottleneck(hidden_channels, hidden_channels, shortcut, 1.0, depthwise=False, act=act) for _ in range(n))
 
     def forward(self, x):
         y = list(self.conv1(x).chunk(2, 1))

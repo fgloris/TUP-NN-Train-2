@@ -29,13 +29,13 @@ class Exp(MyExp):
             from yolox.models import YOLOX
             from yolox.models.backbone.darknet import C2fDarknet
             from yolox.models.neck.yolo_pafpn import YOLOPAFPN
-            from yolox.models.head.yolo_head import YOLOXHead
+            from yolox.models.head.yolo_head import YOLOXHead, YOLOXHeadClsEnhance
             in_channels = [256, 512, 1024]
             in_channels_head = [64, 128, 256]
             # NANO model use depthwise = True, which is main difference.
             backbone = C2fDarknet(self.depth, self.width, depthwise=True, act=self.act)
             neck = YOLOPAFPN(self.depth, self.width, in_channels=in_channels, depthwise=True, act=self.act)
-            head = YOLOXHead(self.num_apexes, self.num_classes, self.num_colors, self.width, in_channels=in_channels_head, depthwise=True, act=self.act)
+            head = YOLOXHeadClsEnhance(self.num_apexes, self.num_classes, self.num_colors, self.width, in_channels=in_channels_head, depthwise=False, act=self.act)
             self.model = YOLOX(backbone, neck, head)
 
         self.model.apply(init_yolo)

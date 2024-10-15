@@ -205,7 +205,6 @@ class C2fDarknet(nn.Module):
                 base_channels * 2,
                 base_channels * 2,
                 n=base_depth,
-                depthwise=depthwise,
                 act=act,
             ),
         )
@@ -217,7 +216,6 @@ class C2fDarknet(nn.Module):
                 base_channels * 4,
                 base_channels * 4,
                 n=base_depth * 3,
-                depthwise=depthwise,
                 act=act,
             ),
         )
@@ -229,7 +227,6 @@ class C2fDarknet(nn.Module):
                 base_channels * 8,
                 base_channels * 8,
                 n=base_depth * 3,
-                depthwise=depthwise,
                 act=act,
             ),
         )
@@ -243,7 +240,6 @@ class C2fDarknet(nn.Module):
                 base_channels * 16,
                 n=base_depth,
                 shortcut=False,
-                depthwise=depthwise,
                 act=act,
             ),
         )
