@@ -44,7 +44,7 @@ class Trainer:
         # training related attr
         self.max_epoch = exp.max_epoch
         self.amp_training = args.fp16
-        self.scaler = torch.cuda.amp.GradScaler(enabled=args.fp16)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=args.fp16)
         self.is_distributed = get_world_size() > 1
         self.rank = get_rank()
         self.local_rank = get_local_rank()
@@ -119,7 +119,7 @@ class Trainer:
         # cv2.imshow("inps",src)
         # cv2.waitKey(0)
 
-        with torch.cuda.amp.autocast(enabled=self.amp_training):
+        with torch.amp.autocast('cuda', enabled=self.amp_training):
             outputs = self.model(inps, targets)
 
         loss = outputs["total_loss"]
@@ -425,7 +425,7 @@ class TrainerWithTeacher(Trainer):
         # training related attr
         self.max_epoch = exp.max_epoch
         self.amp_training = args.fp16
-        self.scaler = torch.cuda.amp.GradScaler(enabled=args.fp16)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=args.fp16)
         self.is_distributed = get_world_size() > 1
         self.rank = get_rank()
         self.local_rank = get_local_rank()
@@ -538,7 +538,7 @@ class TrainerWithTeacher(Trainer):
         self.model.head.training = True
 
         data_end_time = time.time()
-        with torch.cuda.amp.autocast(enabled=self.amp_training):
+        with torch.amp.autocast('cuda', enabled=self.amp_training):
             targets = self.teacher(inps)
         targets = targets.detach()
         # targets = targets.transpose()
@@ -557,7 +557,7 @@ class TrainerWithTeacher(Trainer):
         # cv2.imshow("inps",src)
         # cv2.waitKey(0)
 
-        with torch.cuda.amp.autocast(enabled=self.amp_training):
+        with torch.amp.autocast('cuda', enabled=self.amp_training):
             outputs = self.model(inps, targets)
 
         loss = outputs["total_loss"]

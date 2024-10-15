@@ -960,7 +960,8 @@ class YOLOXHead(nn.Module):
         return num_fg, gt_matched_classes, gt_matched_colors, pred_ious_this_matching, matched_gt_inds
 
 class YOLOXHeadClsEnhance(YOLOXHead):
-    cls_weight = 1.00005
+    iter_count = 0
+    cls_weight = 1.02
     max_cls_weight = 20
     def __init__(
         self,
@@ -977,7 +978,12 @@ class YOLOXHeadClsEnhance(YOLOXHead):
         super().__init__(num_apexes, num_classes, num_colors, width, strides, in_channels, act, depthwise, ksize_head)
 
     def forward(self, xin, labels=None, imgs=None):
-        if self.cls_weight<self.max_cls_weight: self.cls_weight *= 1.00005
+        if self.cls_weight<self.max_cls_weight:
+            self.iter_count += 1
+            if self.iter_count >= 320:
+                self.cls_weight *= 1.02
+                print("cls_weight: ", self.cls_weight)
+                self.iter_count = 0
         return super().forward(xin, labels, imgs)
 
     def get_losses_distill(
